@@ -26,3 +26,6 @@ metro-cache/
 # OS
 .DS_Store
 Thumbs.db
+
+# Verdict App (Frontend) - Excluded
+Verdict/

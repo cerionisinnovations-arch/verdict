@@ -62,12 +62,12 @@ app.post('/send-otp', async (req, res) => {
   }
 });
 
-// 2. Verify OTP
+// 2. Verify OTP and Reset Password
 app.post('/verify-otp', async (req, res) => {
-  const { email, code } = req.body;
+  const { email, code, newPassword } = req.body;
 
-  if (!email || !code) {
-    return res.status(400).json({ error: 'Email and Code are required' });
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: 'Email, Code, and newPassword are required' });
   }
 
   try {
@@ -80,8 +80,16 @@ app.post('/verify-otp', async (req, res) => {
       return res.status(400).json({ error: 'Invalid or expired OTP' });
     }
 
+    // Hash the new password and update the user's record
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+    
+    // In case the user doesn't exist yet, we still delete OTP. 
+    // Ideally check if user exists first.
+    await db.query('UPDATE users SET password_hash = ? WHERE email = ?', [passwordHash, email]);
+    
     await db.query('DELETE FROM otps WHERE email = ?', [email]);
-    res.status(200).json({ success: true, message: 'OTP verified successfully' });
+    res.status(200).json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
     console.error('Error in /verify-otp:', error);
     res.status(500).json({ error: 'Failed to verify OTP' });
@@ -138,8 +146,6 @@ app.post('/login', async (req, res) => {
     const user = users[0];
 
     // 2. Check password
-    const match = await bcrypt.hash(password, user.password_hash);
-    // Note: bcrypt.compare is better, let's fix that
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
@@ -157,6 +163,35 @@ app.post('/login', async (req, res) => {
     res.status(500).json({ error: 'Login failed' });
   }
 });
+
+// Initialize Database tables
+const initializeDb = async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        full_name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) DEFAULT 'client',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS otps (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        code VARCHAR(10) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Database tables verified/initialized.');
+  } catch (error) {
+    console.error('Failed to initialize tables:', error);
+  }
+};
+initializeDb();
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
