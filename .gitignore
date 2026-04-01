@@ -1,0 +1,28 @@
+# Node.js
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Expo (Frontend)
+.expo/
+web-build/
+assets/
+node_modules/
+*.jks
+*.p8
+*.pyc
+
+# Metro (Frontend)
+metro.config.js
+metro-cache/
+
+# OS
+.DS_Store
+Thumbs.db
