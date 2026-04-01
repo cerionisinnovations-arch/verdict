@@ -27,16 +27,25 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 
 // 1. Send OTP
 app.post('/send-otp', async (req, res) => {
-  const { email } = req.body;
+  const { email, reason } = req.body;
 
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required' });
+  if (!email || !reason) {
+    return res.status(400).json({ error: 'Email and reason are required' });
   }
 
-  const otp = generateOTP();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
-
   try {
+    // Check user existence depending on the reason
+    const [existing] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (reason === 'signup' && existing.length > 0) {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+    if (reason === 'reset' && existing.length === 0) {
+      return res.status(400).json({ error: 'Email not found' });
+    }
+
+    const otp = generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
+
     // 1. Save OTP to DB
     await db.query(
       'INSERT INTO otps (email, code, expires_at) VALUES (?, ?, ?)',
@@ -44,15 +53,16 @@ app.post('/send-otp', async (req, res) => {
     );
 
     // 2. Send email via Hostinger
+    const subjectTitle = reason === 'signup' ? 'Your Verdict Verification Code' : 'Your Password Reset OTP';
     await transporter.sendMail({
       from: `"Verdict App" <${process.env.SMTP_USER}>`,
       to: email,
-      subject: 'Your Password Reset OTP',
-      text: `Your OTP for password reset is: ${otp}. It will expire in 10 minutes.`,
-      html: `<b>Your OTP for password reset is: ${otp}</b><br>It will expire in 10 minutes.`,
+      subject: subjectTitle,
+      text: `Your OTP is: ${otp}. It will expire in 10 minutes.`,
+      html: `<b>Your OTP is: ${otp}</b><br>It will expire in 10 minutes.`,
     });
 
-    console.log('OTP sent and saved for:', email);
+    console.log(`OTP (${reason}) sent and saved for:`, email);
     
     // SECURE: We no longer return the OTP in the response
     res.status(200).json({ success: true, message: 'OTP sent successfully' });
@@ -98,10 +108,10 @@ app.post('/verify-otp', async (req, res) => {
 
 // 3. User Signup
 app.post('/signup', async (req, res) => {
-  const { fullName, email, password, role } = req.body;
+  const { fullName, email, password, role, code } = req.body;
 
-  if (!fullName || !email || !password) {
-    return res.status(400).json({ error: 'All fields are required' });
+  if (!fullName || !email || !password || !code) {
+    return res.status(400).json({ error: 'All fields and OTP code are required' });
   }
 
   try {
@@ -111,15 +121,28 @@ app.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // 2. Hash password
+    // 2. Verify OTP
+    const [rows] = await db.query(
+      'SELECT * FROM otps WHERE email = ? AND code = ? AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1',
+      [email, code]
+    );
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    // 3. Hash password
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // 3. Save to DB
+    // 4. Save to DB
     await db.query(
       'INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, ?, ?)',
       [fullName, email, passwordHash, role || 'client']
     );
+
+    // 5. Clean up OTP
+    await db.query('DELETE FROM otps WHERE email = ?', [email]);
 
     res.status(201).json({ success: true, message: 'User created successfully' });
   } catch (error) {
