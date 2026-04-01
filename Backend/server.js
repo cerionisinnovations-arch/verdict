@@ -22,6 +22,32 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+app.get('/health', async (req, res) => {
+  try {
+    const diagnostics = {
+      db_user: !!process.env.DB_USER,
+      smtp_user: process.env.SMTP_USER || 'undefined',
+      dbConnection: null,
+      smtpConnection: null,
+    };
+    try {
+      await db.query('SELECT 1');
+      diagnostics.dbConnection = 'success';
+    } catch (e) {
+      diagnostics.dbConnection = e.message;
+    }
+    try {
+      await transporter.verify();
+      diagnostics.smtpConnection = 'success';
+    } catch (e) {
+      diagnostics.smtpConnection = e.message;
+    }
+    res.status(200).json(diagnostics);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Helper to generate OTP
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
